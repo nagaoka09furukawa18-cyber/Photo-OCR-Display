@@ -92,7 +92,7 @@
             document.getElementById(screenId).classList.add('active');
         }
 
-        // Firestoreから最新のデータを取得する関数（QRと写真をそれぞれ最新1件取得）
+        // Firestoreから最新のデータを直接取得する関数（インデックス不要の単一ドキュメント取得）
         async function loadLatestData() {
             const statusEl = document.getElementById('statusText');
             statusEl.innerText = "最新データを取得中...";
@@ -101,30 +101,32 @@
                 const qrContainer = document.getElementById('qrDisplayContainer');
                 const photoContainer = document.getElementById('photoDisplayContainer');
 
-                // 1. 最新のQRデータを取得
-                const qrSnapshot = await db.collection("scans")
-                    .where("type", "==", "qr")
-                    .orderBy("timestamp", "desc")
-                    .limit(1)
-                    .get();
+                // "latest_data" ドキュメントを直接取得
+                const docRef = db.collection("scans").doc("latest_data");
+                const doc = await docRef.get();
 
                 qrContainer.innerHTML = "";
-                if (qrSnapshot.empty) {
-                    qrContainer.innerHTML = `<p class="text-gray-400 py-4">保存されたQRコードはありません</p>`;
-                } else {
-                    const doc = qrSnapshot.docs[0];
-                    const data = doc.data();
-                    const dateStr = data.timestamp ? data.timestamp.toDate().toLocaleString() : "日時不明";
+                photoContainer.innerHTML = "";
 
+                if (!doc.exists) {
+                    qrContainer.innerHTML = `<p class="text-gray-400 py-4">データがありません</p>`;
+                    photoContainer.innerHTML = `<p class="text-gray-400 py-4">データがありません</p>`;
+                    statusEl.innerText = "最新データはありません（待機中）";
+                    return;
+                }
+
+                const data = doc.data();
+                const dateStr = data.timestamp ? data.timestamp.toDate().toLocaleString() : "日時不明";
+
+                if (data.type === "qr") {
+                    // QRデータの場合の表示
                     const wrapper = document.createElement('div');
                     wrapper.className = "flex flex-col items-center bg-white p-6 rounded shadow border";
                     
-                    // QRコード画像を描画する要素
                     const qrCanvasDiv = document.createElement('div');
                     qrCanvasDiv.className = "mb-4 bg-white p-2 border rounded";
                     wrapper.appendChild(qrCanvasDiv);
 
-                    // QRCode.jsを用いてQRコード画像を生成
                     new QRCode(qrCanvasDiv, {
                         text: data.content,
                         width: 180,
@@ -142,8 +144,26 @@
                     `;
                     wrapper.appendChild(info);
                     qrContainer.appendChild(wrapper);
+                    photoContainer.innerHTML = `<p class="text-gray-400 py-4">最新データはQRコードです</p>`;
+
+                } else if (data.type === "photo_ocr") {
+                    // 写真OCRデータの場合の表示
+                    const wrapper = document.createElement('div');
+                    wrapper.className = "flex flex-col items-center bg-white p-6 rounded shadow border";
+                    wrapper.innerHTML = `
+                        <img src="${data.imageBase64}" alt="最新OCR画像" class="max-h-80 object-contain rounded mb-4 border">
+                        <p class="text-xs text-gray-500">保存日時: ${dateStr}</p>
+                    `;
+                    photoContainer.appendChild(wrapper);
+                    qrContainer.innerHTML = `<p class="text-gray-400 py-4">最新データは写真OCRです</p>`;
                 }
 
+                statusEl.innerText = "最新データの同期が完了しました";
+            } catch (error) {
+                console.error("データ取得エラー:", error);
+                statusEl.innerText = "データ取得エラー: " + error.message;
+            }
+        }
                 // 2. 最新のOCR写真データを取得
                 const photoSnapshot = await db.collection("scans")
                     .where("type", "==", "photo_ocr")
