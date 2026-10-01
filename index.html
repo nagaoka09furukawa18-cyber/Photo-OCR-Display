@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>製造現場用 管理・ビューア画面（QR & OCR）</title>
+    <title>製造現場用 管理・ビューア画面（OCR対応）</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- QRコード生成ライブラリ (QRCode.js) -->
@@ -21,31 +21,31 @@
 
     <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6">
         <header class="flex justify-between items-center mb-6 border-b pb-4">
-            <h1 class="text-xl font-bold text-blue-600">📊 製造現場データ管理ビューア（最新1件表示）</h1>
+            <h1 class="text-xl font-bold text-blue-600">📊 製造現場データ管理ビューア（OCR対応）</h1>
             <div class="space-x-2">
                 <button onclick="showScreen('screenMain')" class="px-4 py-2 bg-gray-200 rounded font-semibold hover:bg-gray-300">メイン</button>
                 <button onclick="loadLatestData()" class="px-4 py-2 bg-blue-600 text-white rounded font-semibold hover:bg-blue-700">🔄 最新データ更新</button>
             </div>
         </header>
 
-        <!-- メイン画面 / ダッシュボード -->
+        <!-- メイン画面 -->
         <div id="screenMain" class="screen active">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
                     <h2 class="font-bold text-blue-800 mb-2">📌 最新のQRコード</h2>
-                    <p class="text-sm text-gray-600 mb-4">最後に読み取られたQRコードとその画像を確認できます。</p>
+                    <p class="text-sm text-gray-600 mb-4">最後に読み取られたQRコードを確認できます。</p>
                     <button onclick="showScreen('screenQrView'); loadLatestData();" class="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">QRコードを見る</button>
                 </div>
                 <div class="bg-green-50 p-4 rounded-lg border border-green-200">
-                    <h2 class="font-bold text-green-800 mb-2">📸 最新のOCR写真 (Base64)</h2>
-                    <p class="text-sm text-gray-600 mb-4">最後に保存されたOCR用写真を確認できます。</p>
-                    <button onclick="showScreen('screenPhotoView'); loadLatestData();" class="w-full bg-green-600 text-white py-2 rounded font-bold hover:bg-green-700">保存写真を見る</button>
+                    <h2 class="font-bold text-green-800 mb-2">📸 最新のOCR写真 ＆ AI文字起こし</h2>
+                    <p class="text-sm text-gray-600 mb-4">写真とGeminiによるOCR結果を確認できます。</p>
+                    <button onclick="showScreen('screenPhotoView'); loadLatestData();" class="w-full bg-green-600 text-white py-2 rounded font-bold hover:bg-green-700">保存写真・OCRを見る</button>
                 </div>
             </div>
             
             <div class="bg-gray-50 p-4 rounded-lg">
                 <h3 class="font-bold text-gray-700 mb-2">💡 システム状態</h3>
-                <p id="statusText" class="text-sm text-gray-500">Firestore接続完了・待機中...</p>
+                <p id="statusText" class="text-sm text-gray-500">待機中...</p>
             </div>
         </div>
 
@@ -60,10 +60,10 @@
             </div>
         </div>
 
-        <!-- 最新写真表示画面 -->
+        <!-- 最新写真＆OCR表示画面 -->
         <div id="screenPhotoView" class="screen">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-lg font-bold">最新の保存写真</h2>
+                <h2 class="text-lg font-bold">最新のOCR写真 ＆ AI文字起こし</h2>
                 <button onclick="showScreen('screenMain')" class="text-sm text-blue-600 underline">← 戻る</button>
             </div>
             <div id="photoDisplayContainer" class="flex flex-col items-center justify-center border p-6 rounded bg-gray-50 min-h-[250px]">
@@ -73,6 +73,9 @@
     </div>
 
     <script>
+        // --- 設定エリア ---
+        const GEMINI_API_KEY = "AIzaSy...（あなたのGemini APIキーを入力してください）"; // ←ここにAPIキーをセット
+
         // --- Firebase 初期設定 ---
         const firebaseConfig = {
             apiKey: "AIzaSyCn3nBXukyJ7HqZQudIruiG8JRejUb8x7A",
@@ -92,7 +95,55 @@
             document.getElementById(screenId).classList.add('active');
         }
 
-        // Firestoreから最新のデータを直接取得する関数（latest_data ドキュメントを直接取得）
+        // Gemini APIを使って画像を文字起こし（OCR）する関数
+        async function runGeminiOCR(base64DataUrl) {
+            try {
+                // "data:image/jpeg;base64,xxxx" の形式からプレフィックスとMIMEタイプを分離
+                const matches = base64DataUrl.match(/^data:(.+?);base64,(.+)$/);
+                if (!matches) throw new Error("画像データの形式が不正です。");
+                
+                const mimeType = matches[1];
+                const base64Image = matches[2];
+
+                const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+                const payload = {
+                    contents: [
+                        {
+                            parts: [
+                                { text: "この画像に写っている製造指示やテキストを正確に読み取り、文字起こししてください。構造やレイアウトを意識してわかりやすく出力してください。" },
+                                {
+                                    inline_data: {
+                                        mime_type: mimeType,
+                                        data: base64Image
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                };
+
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.error?.message || "API呼び出しに失敗しました");
+                }
+
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                return text || "文字が見つかりませんでした。";
+            } catch (error) {
+                console.error("Gemini OCRエラー:", error);
+                return "OCR解析エラー: " + error.message;
+            }
+        }
+
+        // Firestoreからデータを取得して画面に反映
         async function loadLatestData() {
             const statusEl = document.getElementById('statusText');
             statusEl.innerText = "最新データを取得中...";
@@ -101,7 +152,6 @@
                 const qrContainer = document.getElementById('qrDisplayContainer');
                 const photoContainer = document.getElementById('photoDisplayContainer');
 
-                // "latest_data" ドキュメントを直接取得
                 const docRef = db.collection("scans").doc("latest_data");
                 const doc = await docRef.get();
 
@@ -111,7 +161,7 @@
                 if (!doc.exists) {
                     qrContainer.innerHTML = `<p class="text-gray-400 py-4">データがありません</p>`;
                     photoContainer.innerHTML = `<p class="text-gray-400 py-4">データがありません</p>`;
-                    statusEl.innerText = "最新データはありません（待機中）";
+                    statusEl.innerText = "最新データはありません";
                     return;
                 }
 
@@ -119,9 +169,8 @@
                 const dateStr = data.timestamp ? data.timestamp.toDate().toLocaleString() : "日時不明";
 
                 if (data.type === "qr") {
-                    // QRデータの場合の表示
                     const wrapper = document.createElement('div');
-                    wrapper.className = "flex flex-col items-center bg-white p-6 rounded shadow border";
+                    wrapper.className = "flex flex-col items-center bg-white p-6 rounded shadow border w-full";
                     
                     const qrCanvasDiv = document.createElement('div');
                     qrCanvasDiv.className = "mb-4 bg-white p-2 border rounded";
@@ -136,29 +185,37 @@
                         correctLevel : QRCode.CorrectLevel.H
                     });
 
-                    const info = document.createElement('div');
-                    info.className = "text-center";
-                    info.innerHTML = `
+                    wrapper.innerHTML += `
                         <p class="font-bold text-lg text-blue-600 mb-1">${data.content}</p>
                         <p class="text-xs text-gray-400">保存日時: ${dateStr}</p>
                     `;
-                    wrapper.appendChild(info);
                     qrContainer.appendChild(wrapper);
-                    photoContainer.innerHTML = `<p class="text-gray-400 py-4">最新データはQRコードです</p>`;
+                    photoContainer.innerHTML = `<p class="text-gray-400 py-4">現在の最新データはQRコードです</p>`;
 
                 } else if (data.type === "photo_ocr") {
-                    // 写真OCRデータの場合の表示
+                    // 写真表示用のコンテナ
                     const wrapper = document.createElement('div');
-                    wrapper.className = "flex flex-col items-center bg-white p-6 rounded shadow border";
+                    wrapper.className = "flex flex-col items-center bg-white p-6 rounded shadow border w-full";
+                    
                     wrapper.innerHTML = `
                         <img src="${data.imageBase64}" alt="最新OCR画像" class="max-h-80 object-contain rounded mb-4 border">
-                        <p class="text-xs text-gray-500">保存日時: ${dateStr}</p>
+                        <p class="text-xs text-gray-500 mb-4">保存日時: ${dateStr}</p>
+                        <div class="w-full border-t pt-4">
+                            <h3 class="font-bold text-gray-700 mb-2">🤖 Gemini AI 文字起こし結果:</h3>
+                            <div id="ocrResultBox" class="bg-gray-50 p-4 rounded border text-sm whitespace-pre-wrap text-gray-800 min-h-[80px]">文字起こしを実行中...</div>
+                        </div>
                     `;
                     photoContainer.appendChild(wrapper);
-                    qrContainer.innerHTML = `<p class="text-gray-400 py-4">最新データは写真OCRです</p>`;
+                    qrContainer.innerHTML = `<p class="text-gray-400 py-4">現在の最新データは写真OCRです</p>";
+
+                    statusEl.innerText = "Gemini APIで文字起こしを実行中...";
+
+                    // Gemini APIを呼び出してOCRテキストを取得・表示
+                    const ocrText = await runGeminiOCR(data.imageBase64);
+                    document.getElementById('ocrResultBox').innerText = ocrText;
                 }
 
-                statusEl.innerText = "最新データの同期が完了しました";
+                statusEl.innerText = "処理が完了しました";
             } catch (error) {
                 console.error("データ取得エラー:", error);
                 statusEl.innerText = "データ取得エラー: " + error.message;
