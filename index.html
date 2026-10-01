@@ -92,7 +92,7 @@
             document.getElementById(screenId).classList.add('active');
         }
 
-        // Firestoreから最新のデータを直接取得する関数（インデックス不要の単一ドキュメント取得）
+        // Firestoreから最新のデータを直接取得する関数（latest_data ドキュメントを直接取得）
         async function loadLatestData() {
             const statusEl = document.getElementById('statusText');
             statusEl.innerText = "最新データを取得中...";
@@ -156,36 +156,6 @@
                     `;
                     photoContainer.appendChild(wrapper);
                     qrContainer.innerHTML = `<p class="text-gray-400 py-4">最新データは写真OCRです</p>`;
-                }
-
-                statusEl.innerText = "最新データの同期が完了しました";
-            } catch (error) {
-                console.error("データ取得エラー:", error);
-                statusEl.innerText = "データ取得エラー: " + error.message;
-            }
-        }
-                // 2. 最新のOCR写真データを取得
-                const photoSnapshot = await db.collection("scans")
-                    .where("type", "==", "photo_ocr")
-                    .orderBy("timestamp", "desc")
-                    .limit(1)
-                    .get();
-
-                photoContainer.innerHTML = "";
-                if (photoSnapshot.empty) {
-                    photoContainer.innerHTML = `<p class="text-gray-400 py-4">保存された写真はありません</p>`;
-                } else {
-                    const doc = photoSnapshot.docs[0];
-                    const data = doc.data();
-                    const dateStr = data.timestamp ? data.timestamp.toDate().toLocaleString() : "日時不明";
-
-                    const wrapper = document.createElement('div');
-                    wrapper.className = "flex flex-col items-center bg-white p-6 rounded shadow border";
-                    wrapper.innerHTML = `
-                        <img src="${data.imageBase64}" alt="最新OCR画像" class="max-h-80 object-contain rounded mb-4 border">
-                        <p class="text-xs text-gray-500">保存日時: ${dateStr}</p>
-                    `;
-                    photoContainer.appendChild(wrapper);
                 }
 
                 statusEl.innerText = "最新データの同期が完了しました";
