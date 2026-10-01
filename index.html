@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>製造現場用 管理・ビューア画面（QR & OCR）</title>
+    <!-- Tailwind CSS (スタイリッシュなUI用) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDK (Compat版) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    <style>
+        body { background-color: #f3f4f6; color: #1f2937; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .screen { display: none; }
+        .screen.active { display: block; }
+    </style>
+</head>
+<body class="p-4">
+
+    <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6">
+        <header class="flex justify-between items-center mb-6 border-b pb-4">
+            <h1 class="text-xl font-bold text-blue-600">📊 製造現場データ管理ビューア</h1>
+            <div class="space-x-2">
+                <button onclick="showScreen('screenMain')" class="px-4 py-2 bg-gray-200 rounded font-semibold hover:bg-gray-300">メイン</button>
+                <button onclick="loadScansData()" class="px-4 py-2 bg-blue-600 text-white rounded font-semibold hover:bg-blue-700">🔄 データ更新</button>
+            </div>
+        </header>
+
+        <!-- メイン画面 / ダッシュボード -->
+        <div id="screenMain" class="screen active">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                    <h2 class="font-bold text-blue-800 mb-2">📌 QR読み取り履歴</h2>
+                    <p class="text-sm text-gray-600 mb-4">現場でスキャンされたQRコードの一覧を確認できます。</p>
+                    <button onclick="showScreen('screenQrList'); loadScansData();" class="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">QR履歴を見る</button>
+                </div>
+                <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                    <h2 class="font-bold text-green-800 mb-2">📸 OCR写真一覧 (Base64)</h2>
+                    <p class="text-sm text-gray-600 mb-4">Firestoreに直接保存された写真・OCRイメージを確認できます。</p>
+                    <button onclick="showScreen('screenPhotoList'); loadScansData();" class="w-full bg-green-600 text-white py-2 rounded font-bold hover:bg-green-700">保存写真を見る</button>
+                </div>
+            </div>
+            
+            <div class="bg-gray-50 p-4 rounded-lg">
+                <h3 class="font-bold text-gray-700 mb-2">💡 システム状態</h3>
+                <p id="statusText" class="text-sm text-gray-500">Firestore接続完了・待機中...</p>
+            </div>
+        </div>
+
+        <!-- QR履歴一覧画面 -->
+        <div id="screenQrList" class="screen">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold">QRコードスキャン一覧</h2>
+                <button onclick="showScreen('screenMain')" class="text-sm text-blue-600 underline">← 戻る</button>
+            </div>
+            <div id="qrListContainer" class="space-y-2 max-h-96 overflow-y-auto border p-2 rounded bg-gray-50">
+                <p class="text-gray-500 text-center py-4">読み込み中...</p>
+            </div>
+        </div>
+
+        <!-- 写真・OCR一覧画面 -->
+        <div id="screenPhotoList" class="screen">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold">保存されたOCR写真一覧</h2>
+                <button onclick="showScreen('screenMain')" class="text-sm text-blue-600 underline">← 戻る</button>
+            </div>
+            <div id="photoGridContainer" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto p-2 border rounded bg-gray-50">
+                <p class="text-gray-500 text-center py-4 col-span-full">読み込み中...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 画像詳細モーダル -->
+    <div id="imageModal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white p-4 rounded-lg max-w-lg w-full text-center relative">
+            <h3 class="font-bold mb-2">保存画像プレビュー</h3>
+            <img id="modalImage" src="" alt="詳細画像" class="max-h-[70vh] mx-auto rounded border mb-4">
+            <p id="modalInfo" class="text-xs text-gray-500 mb-4"></p>
+            <button onclick="closeModal()" class="px-4 py-2 bg-gray-600 text-white rounded font-bold">閉じる</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Firebase 初期設定 ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyCn3nBXukyJ7HqZQudIruiG8JRejUb8x7A",
+            authDomain: "imageocr-b1f78.firebaseapp.com",
+            projectId: "imageocr-b1f78",
+            messagingSenderId: "524688602430",
+            appId: "1:524688602430:web:5e993414e427dc1e59e86f"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+
+        // 画面切り替え関数 (GASアプリ等でもおなじみの構造)
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+        }
+
+        // Firestoreからデータを一括取得して振り分ける関数
+        async function loadScansData() {
+            const statusEl = document.getElementById('statusText');
+            statusEl.innerText = "Firestoreからデータを取得中...";
+
+            try {
+                // scansコレクションからタイムスタンプの新しい順に取得
+                const snapshot = await db.collection("scans").orderBy("timestamp", "desc").get();
+                
+                const qrContainer = document.getElementById('qrListContainer');
+                const photoContainer = document.getElementById('photoGridContainer');
+                
+                qrContainer.innerHTML = "";
+                photoContainer.innerHTML = "";
+
+                let qrCount = 0;
+                let photoCount = 0;
+
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    const dateStr = data.timestamp ? data.timestamp.toDate().toLocaleString() : "日時不明";
+
+                    if (data.type === "qr") {
+                        qrCount++;
+                        const div = document.createElement('div');
+                        div.className = "bg-white p-3 rounded shadow-sm border flex justify-between items-center";
+                        div.innerHTML = `<div><span class="font-bold text-blue-600">${data.content}</span><br><span class="text-xs text-gray-400">${dateStr}</span></div><span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">QR</span>`;
+                        qrContainer.appendChild(div);
+                    } else if (data.type === "photo_ocr" || data.imageBase64) {
+                        photoCount++;
+                        const card = document.createElement('div');
+                        card.className = "bg-white p-3 rounded shadow-sm border flex flex-col items-center cursor-pointer hover:shadow-md transition";
+                        card.onclick = () => openModal(data.imageBase64, dateStr, doc.id);
+                        
+                        card.innerHTML = `
+                            <img src="${data.imageBase64}" alt="OCR画像" class="h-32 object-cover rounded mb-2 border">
+                            <span class="text-xs text-gray-500">${dateStr}</span>
+                            <span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded mt-1">OCR画像</span>
+                        `;
+                        photoContainer.appendChild(card);
+                    }
+                });
+
+                if (qrCount === 0) qrContainer.innerHTML = `<p class="text-gray-400 text-center py-4">QRの履歴はありません</p>`;
+                if (photoCount === 0) photoContainer.innerHTML = `<p class="text-gray-400 text-center py-4 col-span-full">保存された写真はありません</p>`;
+
+                statusEl.innerText = `データ同期完了 (QR: ${qrCount件}, 写真: ${photoCount件})`;
+            } catch (error) {
+                console.error("データ取得エラー:", error);
+                statusEl.innerText = "データ取得エラー: " + error.message;
+            }
+        }
+
+        function openModal(base64, dateStr, docId) {
+            document.getElementById('modalImage').src = base64;
+            document.getElementById('modalInfo').innerText = `保存日時: ${dateStr} / ID: ${docId}`;
+            document.getElementById('imageModal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('imageModal').classList.add('hidden');
+        }
+
+        // 初期読み込み
+        window.onload = function() {
+            loadScansData();
+        };
+    </script>
+</body>
+</html>
